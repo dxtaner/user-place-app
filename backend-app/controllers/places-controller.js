@@ -121,40 +121,38 @@ const createPlace = async (req, res, next) => {
 };
 
 const updatePlaceById = async (req, res, next) => {
-  const errors = validationResult(req);
-
-  if (!errors.isEmpty()) {
-    return next(createError("Invalid information!", 422));
-  }
-
   const { placeId } = req.params;
   const { title, description } = req.body;
+
   let place;
 
   try {
-    place = await Place.findById(placeId);
+    place = await Place.findById(placeId).populate("creator");
   } catch (err) {
-    return next(createError("Couldn't find place!", 500));
+    return next(createError("Couldn't find place for the given ID!", 500));
   }
 
-  if (place.creator.toString() !== req.user.userId) {
-    return next(
-      createError("You can't edit places that don't belong to you!", 401)
-    );
+  if (!place) {
+    return next(createError("Place not found!", 404));
   }
 
-  place.title = title;
-  place.description = description;
+  if (place.creator.id.toString() !== req.user.userId) {
+    return next(createError("You can't update places that don't belong to you!", 401));
+  }
+
+  place.title = title || place.title;  
+  place.description = description || place.description;  
 
   try {
-    await place.save();
-  } catch (err) {
-    return next(createError("Couldn't save place!", 500));
-  }
+    const updatedPlace = await place.save();
 
-  res
-    .status(200)
-    .json({ succces: true, place: place.toObject({ getters: true }) });
+    res.status(200).json({
+      message: "Place updated successfully!",
+      place: updatedPlace,
+    });
+  } catch (err) {
+    return next(createError("Couldn't update place!", 500));
+  }
 };
 
 const deletePlaceById = async (req, res, next) => {
@@ -168,13 +166,11 @@ const deletePlaceById = async (req, res, next) => {
   }
 
   if (!place) {
-    return next(createError("Couldn't find place for the given ID!", 500));
+    return next(createError("Place not found!", 404));
   }
 
-  if (place.creator.id !== req.user.userId) {
-    return next(
-      createError("You can't delete places that don't belong to you!", 401)
-    );
+  if (place.creator.id.toString() !== req.user.userId) {
+    return next(createError("You can't delete places that don't belong to you!", 401));
   }
 
   try {
@@ -187,18 +183,22 @@ const deletePlaceById = async (req, res, next) => {
     await place.creator.save({ session });
 
     await session.commitTransaction();
+    session.endSession();
   } catch (err) {
     return next(createError("Couldn't remove place!", 500));
   }
 
-  fs.unlink(place.image, (error) => {
-    if (error) {
-      console.log(error);
-    }
-  });
+  if (place.image) {
+    fs.unlink(place.image, (err) => {
+      if (err) {
+        console.log("Error deleting image file:", err);
+      }
+    });
+  }
 
-  res.status(200).json({ message: "Deleted place!" });
+  res.status(200).json({ message: "Place deleted successfully!" });
 };
+
 
 exports.getPlaceById = getPlaceById;
 exports.getPlacesByUserId = getPlacesByUserId;
